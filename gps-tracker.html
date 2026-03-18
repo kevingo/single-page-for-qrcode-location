@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPS 軌跡追蹤</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --accent: #00ff9d;
+    --accent2: #ff6b35;
+    --text: #e8e8f0;
+    --muted: #555570;
+    --danger: #ff4466;
+    --grid: rgba(0,255,157,0.04);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Space Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── grid bg ─── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; }
+
+  /* ─── DESKTOP ─── */
+  #desktop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 4vw, 52px);
+    font-weight: 800;
+    line-height: 1.1;
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.6;
+  }
+
+  #qr-container {
+    display: flex;
+    justify-content: center;
+    margin: 8px 0 24px;
+  }
+
+  #qrcode {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    display: inline-block;
+  }
+
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0,255,157,0.06);
+    border: 1px solid rgba(0,255,157,0.15);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .dot.waiting { background: var(--muted); }
+  .dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1.5s infinite;
+  }
+  .dot.stopped { background: var(--accent2); }
+
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 8px var(--accent); }
+    50% { box-shadow: 0 0 20px var(--accent); }
+  }
+
+  #status-text { flex: 1; }
+
+  .label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+  }
+
+  /* ─── Stats ─── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .stat {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .stat-label { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+  .stat-value { font-size: 20px; font-weight: 700; font-family: 'Syne', sans-serif; color: var(--accent); }
+
+  /* ─── Map ─── */
+  #map-section {
+    width: 100%;
+    max-width: 900px;
+    margin-top: 32px;
+    display: none;
+  }
+
+  #map-section.visible { display: block; }
+
+  .map-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .map-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  #map-frame {
+    width: 100%;
+    height: 480px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  /* export btn */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #000;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn.danger { background: var(--danger); color: white; }
+
+  /* ─── MOBILE ─── */
+  #mobile {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 24px;
+    text-align: center;
+  }
+
+  .mobile-icon {
+    font-size: 64px;
+    margin-bottom: 24px;
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+
+  .mobile-h { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; margin-bottom: 12px; }
+  .mobile-p { color: var(--muted); font-size: 13px; line-height: 1.8; margin-bottom: 32px; }
+
+  .big-btn {
+    width: 100%;
+    max-width: 300px;
+    padding: 20px;
+    border-radius: 16px;
+    border: none;
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .big-btn::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: rgba(255,255,255,0.1);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .big-btn:hover::after { opacity: 1; }
+  .big-btn:active { transform: scale(0.97); }
+
+  .start-btn { background: var(--accent); color: #000; box-shadow: 0 0 30px rgba(0,255,157,0.3); }
+  .stop-btn { background: var(--danger); color: white; box-shadow: 0 0 30px rgba(255,68,102,0.3); }
+
+  .mobile-coords {
+    margin-top: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    width: 100%;
+    max-width: 300px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: left;
+    display: none;
+  }
+
+  .coord-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .coord-label { color: var(--muted); }
+  .coord-val { color: var(--accent); font-weight: 700; }
+
+  .recording-badge {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,68,102,0.1);
+    border: 1px solid rgba(255,68,102,0.3);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--danger);
+    margin-bottom: 20px;
+  }
+  .rec-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--danger);
+    animation: pulse-red 1s infinite;
+  }
+  @keyframes pulse-red {
+    0%,100% { box-shadow: 0 0 4px var(--danger); }
+    50% { box-shadow: 0 0 12px var(--danger); }
+  }
+
+  /* instructions */
+  .instr {
+    background: rgba(255,107,53,0.08);
+    border: 1px solid rgba(255,107,53,0.2);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 12px;
+    color: var(--accent2);
+    margin-top: 16px;
+    line-height: 1.7;
+    max-width: 420px;
+    text-align: left;
+  }
+  .instr strong { display: block; margin-bottom: 4px; color: var(--accent2); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ DESKTOP VIEW ═══════════════ -->
+<div id="desktop" class="page">
+  <div class="logo">GPS Tracker</div>
+  <h1>手機軌跡<br><span>即時記錄</span></h1>
+
+  <div class="card">
+    <div class="label">步驟一：掃描 QR Code 開始</div>
+
+    <div id="qr-container">
+      <div id="qrcode"></div>
+    </div>
+
+    <div class="status-badge">
+      <div class="dot waiting" id="status-dot"></div>
+      <div id="status-text">等待手機掃描...</div>
+    </div>
+
+    <div class="instr">
+      <strong>📋 使用說明</strong>
+      1. 用手機掃描上方 QR Code<br>
+      2. 點「開始記錄」允許定位<br>
+      3. 帶著手機行走<br>
+      4. 再次掃描同一 QR Code<br>
+      5. 點「停止記錄」→ 軌跡顯示在此頁
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="stat-label">追蹤點數</div>
+        <div class="stat-value" id="point-count">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">距離(m)</div>
+        <div class="stat-value" id="distance">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">狀態</div>
+        <div class="stat-value" id="state-label" style="font-size:14px;color:var(--muted)">待機</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">時間(秒)</div>
+        <div class="stat-value" id="elapsed">0</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="map-section">
+    <div class="map-header">
+      <div class="map-title">📍 GPS 軌跡地圖</div>
+      <a id="export-btn" class="btn" href="#" download="gps-track.geojson">⬇ 匯出 GeoJSON</a>
+    </div>
+    <div id="map-frame"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ MOBILE VIEW ═══════════════ -->
+<div id="mobile" class="page">
+  <div class="mobile-icon" id="mobile-icon">📡</div>
+  <div class="mobile-h" id="mobile-title">GPS 軌跡追蹤</div>
+  <p class="mobile-p" id="mobile-desc">按下按鈕開始記錄您的位置軌跡。請確保已允許位置存取權限。</p>
+
+  <div class="recording-badge" id="rec-badge">
+    <div class="rec-dot"></div>
+    REC — 正在記錄
+  </div>
+
+  <button class="big-btn start-btn" id="start-btn" onclick="mobileStart()">
+    🎯 開始記錄
+  </button>
+  <button class="big-btn stop-btn" id="stop-btn" style="display:none;" onclick="mobileStop()">
+    🛑 停止記錄
+  </button>
+
+  <div class="mobile-coords" id="coords-box">
+    <div class="coord-row"><span class="coord-label">緯度</span><span class="coord-val" id="m-lat">--</span></div>
+    <div class="coord-row"><span class="coord-label">經度</span><span class="coord-val" id="m-lng">--</span></div>
+    <div class="coord-row"><span class="coord-label">精確度(m)</span><span class="coord-val" id="m-acc">--</span></div>
+    <div class="coord-row" style="margin:0"><span class="coord-label">已記錄</span><span class="coord-val" id="m-count">0 點</span></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  SHARED UTILS
+// ═══════════════════════════════════════════════
+const SESSION_KEY = 'gps_session_';
+const isMobileView = window.location.hash.startsWith('#track-');
+
+function getSessionId() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#track-')) return hash.slice(7);
+  return null;
+}
+
+function haversine(a, b) {
+  const R = 6371000;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+// ═══════════════════════════════════════════════
+//  DESKTOP LOGIC
+// ═══════════════════════════════════════════════
+if (!isMobileView) {
+  document.getElementById('desktop').style.display = 'flex';
+
+  // Generate session ID
+  const sessionId = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  const trackUrl = window.location.href.split('#')[0] + '#track-' + sessionId;
+
+  // Generate QR Code
+  new QRCode(document.getElementById('qrcode'), {
+    text: trackUrl,
+    width: 200,
+    height: 200,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+
+  // Init session storage
+  const storageKey = SESSION_KEY + sessionId;
+  localStorage.setItem(storageKey, JSON.stringify({ status: 'waiting', points: [], startTime: null }));
+
+  let startTime = null;
+  let elapsedInterval = null;
+
+  function getSession() {
+    return JSON.parse(localStorage.getItem(storageKey) || '{}');
+  }
+
+  function updateDesktopUI() {
+    const sess = getSession();
+    const points = sess.points || [];
+    const dot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const stateLabel = document.getElementById('state-label');
+
+    document.getElementById('point-count').textContent = points.length;
+
+    // distance
+    let dist = 0;
+    for (let i = 1; i < points.length; i++) dist += haversine(points[i-1], points[i]);
+    document.getElementById('distance').textContent = Math.round(dist);
+
+    if (sess.status === 'waiting') {
+      dot.className = 'dot waiting';
+      statusText.textContent = '等待手機掃描...';
+      stateLabel.textContent = '待機';
+      stateLabel.style.color = 'var(--muted)';
+    } else if (sess.status === 'recording') {
+      dot.className = 'dot active';
+      statusText.textContent = '手機正在記錄 GPS...';
+      stateLabel.textContent = '記錄中';
+      stateLabel.style.color = 'var(--accent)';
+      if (!startTime && sess.startTime) {
+        startTime = sess.startTime;
+        elapsedInterval = setInterval(() => {
+          document.getElementById('elapsed').textContent = Math.round((Date.now() - startTime)/1000);
+        }, 1000);
+      }
+    } else if (sess.status === 'done') {
+      dot.className = 'dot stopped';
+      statusText.textContent = '軌跡記錄完成！';
+      stateLabel.textContent = '完成';
+      stateLabel.style.color = 'var(--accent2)';
+      if (elapsedInterval) clearInterval(elapsedInterval);
+      showMap(points);
+    }
+  }
+
+  // Poll localStorage (cross-tab)
+  setInterval(updateDesktopUI, 800);
+  updateDesktopUI();
+
+  // ─── Google Maps rendering ───
+  function showMap(points) {
+    if (points.length < 2) return;
+    const mapSection = document.getElementById('map-section');
+    mapSection.classList.add('visible');
+
+    const center = points[Math.floor(points.length/2)];
+    const pathParam = points.map(p => `${p.lat},${p.lng}`).join('|');
+    const markerStart = `markers=color:green%7C${points[0].lat},${points[0].lng}`;
+    const markerEnd = `markers=color:red%7C${points[points.length-1].lat},${points[points.length-1].lng}`;
+    const pathEncoded = encodeURIComponent(points.map(p=>`${p.lat},${p.lng}`).join('|'));
+
+    // Use Leaflet + OpenStreetMap (no API key needed)
+    const frame = document.getElementById('map-frame');
+    frame.innerHTML = `
+      <iframe id="leaflet-map" style="width:100%;height:100%;border:none;" srcdoc="${escapeHtml(buildLeafletHTML(points))}"></iframe>
+    `;
+
+    // Export GeoJSON
+    const geojson = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: points.map(p=>[p.lng, p.lat]) },
+        properties: { timestamp: new Date().toISOString() }
+      }]
+    };
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], {type:'application/json'});
+    document.getElementById('export-btn').href = URL.createObjectURL(blob);
+  }
+
+  function buildLeafletHTML(points) {
+    const latlngs = JSON.stringify(points.map(p=>[p.lat, p.lng]));
+    const center = points[Math.floor(points.length/2)];
+    return `<!DOCTYPE html><html><head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"><\/script>
+<style>html,body,#map{height:100%;margin:0;padding:0;}</style>
+</head><body>
+<div id="map"></div>
+<script>
+  var map = L.map('map').setView([${center.lat},${center.lng}], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap contributors', maxZoom:19
+  }).addTo(map);
+  var pts = ${latlngs};
+  var poly = L.polyline(pts, {color:'#00ff9d', weight:4, opacity:0.9}).addTo(map);
+  L.marker(pts[0]).addTo(map).bindPopup('🟢 起點').openPopup();
+  L.marker(pts[pts.length-1]).addTo(map).bindPopup('🔴 終點');
+  map.fitBounds(poly.getBounds(), {padding:[30,30]});
+<\/script></body></html>`;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  MOBILE LOGIC
+// ═══════════════════════════════════════════════
+if (isMobileView) {
+  document.getElementById('desktop').style.display = 'none';
+  document.getElementById('mobile').style.display = 'flex';
+
+  const sessionId = getSessionId();
+  const storageKey = SESSION_KEY + sessionId;
+
+  let watchId = null;
+  let points = [];
+
+  // Check if session already started (second scan)
+  const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
+  if (existing.status === 'recording') {
+    // Second scan — show stop button
+    switchToStopMode();
+    points = existing.points || [];
+    document.getElementById('m-count').textContent = points.length + ' 點';
+  }
+
+  function switchToStopMode() {
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('stop-btn').style.display = 'block';
+    document.getElementById('rec-badge').style.display = 'flex';
+    document.getElementById('coords-box').style.display = 'block';
+    document.getElementById('mobile-icon').textContent = '📍';
+    document.getElementById('mobile-title').textContent = '正在記錄軌跡';
+    document.getElementById('mobile-desc').textContent = '帶著手機行走，GPS 正在追蹤您的位置。完成後按停止。';
+  }
+
+  function mobileStart() {
+    if (!navigator.geolocation) {
+      alert('此裝置不支援 GPS 定位');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(pos => {
+      points = [];
+      const sess = { status: 'recording', points: [], startTime: Date.now() };
+      localStorage.setItem(storageKey, JSON.stringify(sess));
+
+      watchId = navigator.geolocation.watchPosition(
+        pos => {
+          const pt = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, t: Date.now() };
+          points.push(pt);
+          const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+          stored.points = points;
+          localStorage.setItem(storageKey, JSON.stringify(stored));
+
+          document.getElementById('m-lat').textContent = pt.lat.toFixed(6);
+          document.getElementById('m-lng').textContent = pt.lng.toFixed(6);
+          document.getElementById('m-acc').textContent = Math.round(pt.acc);
+          document.getElementById('m-count').textContent = points.length + ' 點';
+        },
+        err => { console.warn('GPS error', err); },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      );
+
+      switchToStopMode();
+    }, err => {
+      alert('無法取得位置，請確認已開啟定位權限。\n錯誤：' + err.message);
+    }, { enableHighAccuracy: true });
+  }
+
+  function mobileStop() {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    stored.status = 'done';
+    stored.points = points;
+    localStorage.setItem(storageKey, JSON.stringify(stored));
+
+    document.getElementById('stop-btn').style.display = 'none';
+    document.getElementById('rec-badge').style.display = 'none';
+    document.getElementById('mobile-icon').textContent = '✅';
+    document.getElementById('mobile-title').textContent = '記錄完成！';
+    document.getElementById('mobile-desc').textContent = `已儲存 ${points.length} 個位置點。請到電腦端查看軌跡地圖。`;
+  }
+
+  // expose to onclick
+  window.mobileStart = mobileStart;
+  window.mobileStop = mobileStop;
+}
+</script>
+</body>
+</html>
